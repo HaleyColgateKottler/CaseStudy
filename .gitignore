@@ -1,2 +1,5 @@
  signin.txt
 .Rproj.user
+clean_data.csv
+full_data.csv
+data_for_CATEs.csv

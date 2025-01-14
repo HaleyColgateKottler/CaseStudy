@@ -59,7 +59,7 @@ m1 <- lm(paste('readmit ~', paste0(covariates, collapse = " + ")), full_df)
 vifout <- vif(m1)
 vifout
 
-
+write.csv(full_df, "data_for_CATEs.csv", row.names = FALSE)
 
 
 summary(full_df)

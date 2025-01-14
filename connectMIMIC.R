@@ -63,12 +63,12 @@ older.adults <- older.adults[older.adults$disposition %in% c("HOME", "ADMITTED")
 dem.table <- dbGetQuery(con, "SELECT * FROM mimiciv_hosp.admissions;")
 combo3 <- left_join(older.adults, dem.table, by = c("subject_id", "hadm_id", "race"))
 rm(older.adults)
-rm(dem.table)
 
 reduced.df <- combo3[, c("subject_id", "stay_id", "temperature", "heartrate",
                          "resprate", "o2sat", "sbp", "dbp", "acuity", 
                          "chiefcomplaint", "gender", "anchor_age",
-                         "dod", "hadm_id", "intime", "outtime", "dischtime", "race", 
+                         "dod", "hadm_id", "intime", "outtime", "admittime",
+                         "dischtime", "race", 
                          "disposition", "insurance", "marital_status"
                          )]
 rm(combo3)
@@ -127,6 +127,26 @@ treatment.time <- difftime(reduced.df$outtime, reduced.df$intime, units = "hours
 hist(as.numeric(treatment.time))
 reduced.df$treatment_time <- as.numeric(treatment.time)
 
+reduced.df$readmit <- 0
+for (person.entry in 1:nrow(reduced.df)){
+  hosp.entries <- dem.table[dem.table$subject_id == reduced.df$subject_id[person.entry], ]
+  if (reduced.df$disposition[person.entry] == "HOME"){
+    time.to.admission <- difftime(hosp.entries$admittime,
+                                  reduced.df$outtime[person.entry],
+                                  units = "days")
+  } else {
+    time.to.admission <- difftime(hosp.entries$admittime,
+                                  reduced.df$dischtime[person.entry],
+                                  units = "days")
+  }
+  pos.times <- time.to.admission[time.to.admission > 0]
+  reduced.df$readmit[person.entry] = ifelse(sum(pos.times < 30) > 0,
+                                            1, 0)
+  reduced.df$readmit[person.entry] = ifelse(nrow(hosp.entries) == 0, 1,
+                                            reduced.df$readmit[person.entry])
+}
+reduced.df$readmit <- factor(reduced.df$readmit)
+
 # clean race
 table(reduced.df$race)
 condensed.race <- case_match(reduced.df$race,
@@ -161,7 +181,7 @@ tab.ff <- summary_factorlist(reduced.df,
     dependent = "disposition", # name of grouping / treatment variable
     explanatory = c("temperature", "heartrate", "resprate", "o2sat", "sbp",
                     "dbp", "acuity", "gender", "anchor_age", "race",
-                    "insurance", "marital_status", "mortality30", "treatment_time"),
+                    "insurance", "marital_status", "readmit", "treatment_time"),
     total_col = TRUE, # add column with statistics for the whole sample
     add_row_total = TRUE, # add column with number of valid cases
     include_row_missing_col = FALSE,
@@ -170,7 +190,7 @@ tab.ff <- summary_factorlist(reduced.df,
 
 smaller.df <- reduced.df[, c("disposition", "temperature", "heartrate", "resprate", "o2sat", "sbp",
                              "dbp", "acuity", "gender", "anchor_age", "race",
-                             "insurance", "marital_status", "mortality30", "treatment_time")]
+                             "insurance", "marital_status", "readmit", "treatment_time")]
 
 # drop extraneous variables and repeat missingness table
 # missingness as indicator or impute it
@@ -194,9 +214,41 @@ tab.ff2 <- summary_factorlist(imp.df,
                              dependent = "disposition", # name of grouping / treatment variable
                              explanatory = c("temperature", "heartrate", "resprate", "o2sat", "sbp",
                                              "dbp", "acuity", "gender", "anchor_age", "race",
-                                             "insurance", "marital_status", "mortality30", "treatment_time"),
+                                             "insurance", "marital_status", "readmit", "treatment_time"),
                              total_col = TRUE, # add column with statistics for the whole sample
                              add_row_total = TRUE, # add column with number of valid cases
                              include_row_missing_col = FALSE,
                              na_include = TRUE # make variables' missing data explicit
 )
+write.csv(imp.df, 'full_data.csv', row.names = FALSE)
+
+final.df <- imp.df[,c('disposition', 'readmit', 'gender')]
+final.df$age <- factor(ifelse(imp.df$anchor_age >= 75.4, 1, 0))
+final.df$race <- factor(ifelse(imp.df$race == 'white', 1, 0))
+final.df$insurance <- factor(ifelse(imp.df$insurance == 'Medicare', 1, 0))
+final.df$marital_status <- factor(ifelse(imp.df$marital_status == 'MARRIED', 1, 0))
+col.means <- colMeans(imp.df[ , c('temperature', 'heartrate', 'resprate', 'o2sat', 'sbp',
+                                      'dbp', 'treatment_time')], na.rm = TRUE)
+
+final.df$acuity <- imp.df$acuity
+final.df$temperature <- imp.df$temperature - col.means[['temperature']]
+final.df$heartrate <- imp.df$heartrate - col.means[['heartrate']]
+final.df$resprate <- imp.df$resprate - col.means[['resprate']]
+final.df$o2sat <- imp.df$o2sat - col.means[['o2sat']]
+final.df$sbp <- imp.df$sbp - col.means[['sbp']]
+final.df$dbp <- imp.df$dbp - col.means[['dbp']]
+final.df$treatment_time <- imp.df$treatment_time - col.means[['treatment_time']]
+
+df.vars <- apply(imp.df[, c('temperature', 'heartrate', 'resprate', 'o2sat', 'sbp',
+                                'dbp', 'treatment_time')], 2,
+                 var, use = "complete")
+
+final.df$temperature <- final.df$temperature / sqrt(df.vars[['temperature']])
+final.df$heartrate <- final.df$heartrate / sqrt(df.vars[['heartrate']])
+final.df$resprate <- final.df$resprate / sqrt(df.vars[['resprate']])
+final.df$o2sat <- final.df$o2sat / sqrt(df.vars[['o2sat']])
+final.df$sbp <- final.df$sbp / sqrt(df.vars[['sbp']])
+final.df$dbp <- final.df$dbp / sqrt(df.vars[['dbp']])
+final.df$treatment_time <- final.df$treatment_time / sqrt(df.vars[['treatment_time']])
+
+write.csv(final.df, 'clean_data.csv', row.names = FALSE)
