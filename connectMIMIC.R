@@ -130,20 +130,24 @@ reduced.df$treatment_time <- as.numeric(treatment.time)
 reduced.df$readmit <- 0
 for (person.entry in 1:nrow(reduced.df)){
   hosp.entries <- dem.table[dem.table$subject_id == reduced.df$subject_id[person.entry], ]
+  adjouttime <- NA
   if (reduced.df$disposition[person.entry] == "HOME"){
-    time.to.admission <- difftime(hosp.entries$admittime,
-                                  reduced.df$outtime[person.entry],
-                                  units = "days")
+    adjouttime <- reduced.df$outtime[person.entry]
   } else {
-    time.to.admission <- difftime(hosp.entries$admittime,
-                                  reduced.df$dischtime[person.entry],
-                                  units = "days")
+    adjouttime <- reduced.df$dischtime[person.entry]
   }
+  if (is.na(adjouttime)){
+    adjouttime <- reduced.df$outtime[person.entry]
+  }
+  time.to.admission <- difftime(hosp.entries$admittime,
+                                adjouttime,
+                                units = "days")
   pos.times <- time.to.admission[time.to.admission > 0]
   reduced.df$readmit[person.entry] = ifelse(sum(pos.times < 30) > 0,
                                             1, 0)
-  reduced.df$readmit[person.entry] = ifelse(nrow(hosp.entries) == 0, 1,
-                                            reduced.df$readmit[person.entry])
+  if (reduced.df$mortality30[person.entry] == 1){
+    reduced.df$readmit[person.entry] = 1
+  }
 }
 reduced.df$readmit <- factor(reduced.df$readmit)
 
@@ -164,33 +168,23 @@ condensed.race <- case_match(reduced.df$race,
     "WHITE - OTHER EUROPEAN", "WHITE - RUSSIAN") ~ "white",
   c("MULTIPLE RACE/ETHNICITY", "NATIVE HAWAIIAN OR OTHER PACIFIC ISLANDER",
     "OTHER", "PORTUGUESE", "SOUTH AMERICAN") ~ "other",
-  .default = "unknown"
+  c("UNKNOWN") ~ NA
 )
 reduced.df$race <- factor(condensed.race)
 
-levels(reduced.df$insurance) <- c(levels(reduced.df$insurance), 'Missing')
-reduced.df$insurance[is.na(reduced.df$insurance)] <- "Missing"
-
-levels(reduced.df$marital_status) <- c(levels(reduced.df$marital_status), 'Missing')
-reduced.df$marital_status[is.na(reduced.df$marital_status)] <- "Missing"
 reduced.df$mortality30 <- factor(reduced.df$mortality30)
 # clean chief complaints
 unique(reduced.df$chiefcomplaint)
 
-tab.ff <- summary_factorlist(reduced.df,
-    dependent = "disposition", # name of grouping / treatment variable
-    explanatory = c("temperature", "heartrate", "resprate", "o2sat", "sbp",
-                    "dbp", "acuity", "gender", "anchor_age", "race",
-                    "insurance", "marital_status", "readmit", "treatment_time"),
-    total_col = TRUE, # add column with statistics for the whole sample
-    add_row_total = TRUE, # add column with number of valid cases
-    include_row_missing_col = FALSE,
-    na_include = TRUE # make variables' missing data explicit
-  )
-
 smaller.df <- reduced.df[, c("disposition", "temperature", "heartrate", "resprate", "o2sat", "sbp",
                              "dbp", "acuity", "gender", "anchor_age", "race",
                              "insurance", "marital_status", "readmit", "treatment_time")]
+table(smaller.df$race)
+table(smaller.df$insurance)
+table(smaller.df$marital_status)
+
+table(smaller.df[, c('race', 'insurance', 'marital_status')])
+summary(smaller.df[, c('race', 'insurance', 'marital_status')])
 
 # drop extraneous variables and repeat missingness table
 # missingness as indicator or impute it
@@ -201,6 +195,26 @@ md.pattern(smaller.df, rotate.names = TRUE)
 missings <- apply(smaller.df, 1, function(row){sum(is.na(row))})
 hist(missings)
 smaller.df <- smaller.df[missings <= 3, ]
+
+tab.ff <- summary_factorlist(smaller.df,
+                             dependent = "disposition", # name of grouping / treatment variable
+                             explanatory = c("temperature", "heartrate", "resprate", "o2sat", "sbp",
+                                             "dbp", "acuity", "gender", "anchor_age", "race",
+                                             "insurance", "marital_status", "readmit", "treatment_time"),
+                             total_col = TRUE, # add column with statistics for the whole sample
+                             add_row_total = TRUE, # add column with number of valid cases
+                             include_row_missing_col = FALSE,
+                             na_include = TRUE # make variables' missing data explicit
+)
+
+levels(smaller.df$insurance) <- c(levels(smaller.df$insurance), "missing")
+smaller.df$insurance[is.na(smaller.df$insurance)] <- "missing"
+
+levels(smaller.df$marital_status) <- c(levels(smaller.df$marital_status), "missing")
+smaller.df$marital_status[is.na(smaller.df$marital_status)] <- "missing"
+
+levels(smaller.df$race) <- c(levels(smaller.df$race), "missing")
+smaller.df$race[is.na(smaller.df$race)] <- "missing"
 
 str(smaller.df)
 init = mice(smaller.df, maxit=0) 
@@ -221,34 +235,3 @@ tab.ff2 <- summary_factorlist(imp.df,
                              na_include = TRUE # make variables' missing data explicit
 )
 write.csv(imp.df, 'full_data.csv', row.names = FALSE)
-
-final.df <- imp.df[,c('disposition', 'readmit', 'gender')]
-final.df$age <- factor(ifelse(imp.df$anchor_age >= 75.4, 1, 0))
-final.df$race <- factor(ifelse(imp.df$race == 'white', 1, 0))
-final.df$insurance <- factor(ifelse(imp.df$insurance == 'Medicare', 1, 0))
-final.df$marital_status <- factor(ifelse(imp.df$marital_status == 'MARRIED', 1, 0))
-col.means <- colMeans(imp.df[ , c('temperature', 'heartrate', 'resprate', 'o2sat', 'sbp',
-                                      'dbp', 'treatment_time')], na.rm = TRUE)
-
-final.df$acuity <- imp.df$acuity
-final.df$temperature <- imp.df$temperature - col.means[['temperature']]
-final.df$heartrate <- imp.df$heartrate - col.means[['heartrate']]
-final.df$resprate <- imp.df$resprate - col.means[['resprate']]
-final.df$o2sat <- imp.df$o2sat - col.means[['o2sat']]
-final.df$sbp <- imp.df$sbp - col.means[['sbp']]
-final.df$dbp <- imp.df$dbp - col.means[['dbp']]
-final.df$treatment_time <- imp.df$treatment_time - col.means[['treatment_time']]
-
-df.vars <- apply(imp.df[, c('temperature', 'heartrate', 'resprate', 'o2sat', 'sbp',
-                                'dbp', 'treatment_time')], 2,
-                 var, use = "complete")
-
-final.df$temperature <- final.df$temperature / sqrt(df.vars[['temperature']])
-final.df$heartrate <- final.df$heartrate / sqrt(df.vars[['heartrate']])
-final.df$resprate <- final.df$resprate / sqrt(df.vars[['resprate']])
-final.df$o2sat <- final.df$o2sat / sqrt(df.vars[['o2sat']])
-final.df$sbp <- final.df$sbp / sqrt(df.vars[['sbp']])
-final.df$dbp <- final.df$dbp / sqrt(df.vars[['dbp']])
-final.df$treatment_time <- final.df$treatment_time / sqrt(df.vars[['treatment_time']])
-
-write.csv(final.df, 'clean_data.csv', row.names = FALSE)
