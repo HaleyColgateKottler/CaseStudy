@@ -6,17 +6,16 @@ covariates <- c("anchor_age",             "raceasian",              "raceblack",
                 "racehispanic.or.latino", "racemissing",            "raceother",             
                 "insuranceMedicaid",      "insuranceOther",         "marital_statusDIVORCED",
                 "marital_statusSINGLE",   "marital_statusWIDOWED",  "genderM" )
-outcome <- c('readmit')
-treatment <- c('disposition')
+outcome <- 'readmit'
+treatment <- 'disposition'
 proxies <- c('temperature', 'heartrate', 'resprate', 'o2sat', 'sbp', 'dbp',
              'acuity', 'treatment_time')
-
+k <- 7
 
 
 proxyest <- function(full_df, indices){
   full_df <- full_df[indices, ]
-  k = 7
-  z.vars <- c(proxies, 'disposition')
+  z.vars <- c(proxies, treatment)
   h.vars <- paste0("h", 1:k)
   zerovars <- c()
   if (k > 1){
@@ -27,7 +26,6 @@ proxyest <- function(full_df, indices){
       }
     }
   }
-  z.vars <- c(proxies, 'disposition')
   model <- paste(paste(paste0("h", 1:k), collapse = " + "), "=~",
                  paste(z.vars, collapse = " + "), "\n",
                  paste(paste0("h", 1:k), collapse = " + "), "~",
@@ -58,23 +56,15 @@ proxyest <- function(full_df, indices){
   
   predU_ZXA <- covU_ZX %*% (predU_Zcomp + predU_Xcomp)
   expanded_df <- cbind(full_df, t(predU_ZXA))
-
+  
   model2 <- paste(outcome, "~ 1",
-                  " + disposition",
-                  "+ disposition * h1",
-                  "+ disposition * h2",
-                  "+ disposition * h3",
-                  "+ disposition * h4",
-                  "+ disposition * h5",
-                  "+ disposition * h6",
-                  "+ disposition * h7"
+                  " + ", treatment,
+                  paste(paste0(paste("+", treatment, "*"), paste0(" h", 1:k)),
+                        collapse = " ")
   )
   reg <- lm(model2, expanded_df)
   betas <- reg$coefficients
-  gamma <- c(betas[["disposition"]], betas[["disposition:h1"]],
-             betas[["disposition:h2"]], betas[["disposition:h3"]],
-             betas[["disposition:h4"]], betas[["disposition:h5"]],
-             betas[["disposition:h6"]], betas[["disposition:h7"]])
+  gamma <- c(betas[[treatment]], betas[paste0(treatment, ":h", 1:k)])
   
   
   lambda.est <- params$lambda[1:(p), 1:k]
